@@ -1,0 +1,179 @@
+<!-- game_app/templates/game_app/game.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connect Four</title>
+    <!-- Include JavaScript for game logic and WebSocket connection -->
+    <script>
+        const VALID_MOVE_REGEX = new RegExp('^[0123456][LR]$');
+        const GAME_STATES = {
+            WaitingRoom: 'waiting_room',
+            Started: 'started',
+            Winner: 'winner',
+            Draw: 'draw',
+        }
+        const ERROR_CODES = {
+            UnableToJoin: 4000
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Replace 'game_id' with the actual game ID from your view's context
+            const gameId = {{ game_id }};
+            var board = document.getElementById('game-board');
+            var userInput = document.getElementById('game-input');
+            var alertBanner = document.getElementById('alert-banner');
+            var gameState = document.getElementById('game-state');
+
+            // Create a WebSocket connection to the server
+            const socket = new WebSocket(`ws://${window.location.host}/ws/game/${gameId}/`);
+
+            // Connection opened
+            socket.addEventListener('open', (event) => {
+                console.log('WebSocket connection opened:', event);
+            });
+
+            // Connection closed
+            socket.addEventListener('close', (event) => {
+                console.log('disconnect');
+                if (event.code === ERROR_CODES.UnableToJoin) {
+                    displayError('Unable to join game. Game room may already be full.');
+                }
+            });
+
+            // Listen for messages from the server
+            socket.addEventListener('message', (event) => {
+                const data = JSON.parse(event.data);
+                console.log('WebSocket message received:', data);
+                if (data.type === 'game_state') {
+                    if (data.state) {
+                        updateGameState(
+                            data.state,
+                            data.winner_room_id,
+                            data.player_room_id,
+                            data.turn_room_id
+                        );
+                    }
+                    if (data.board) {
+                        const boardDescription = JSON.parse(data.board)
+                        // Update the game board with the new state received from the server
+                        drawBoard(boardDescription.board);
+                    }
+                    if (data.winner) {
+                        // Display the winner or a draw message if the game is over
+                        displayWinner(data.winner);
+                    }
+                }
+
+                if (data.type === 'error') {
+                    // Display an error message if the server sends an error
+                    displayError(data.message);
+                }
+            });
+
+            function validateMove(move) {
+                if (!VALID_MOVE_REGEX.test(move)) {
+                    alertBanner.textContent = `Move '${move}' is not valid. Please correct input`;
+                    return false;
+                }
+                return true;
+            }
+
+            // Function to send a move to the server
+            function sendMove(move) {
+                socket.send(JSON.stringify({ 'move': move }));
+            }
+
+            // Function to update the game board based on the new state received from the server
+            function drawBoard(inputBoard) {
+                let content = '';
+                inputBoard.forEach((row) => {
+                    content += '['
+                    row.forEach((el) => {
+                        content += el;
+                    })
+                    content += ']<br/>'
+                });
+                board.innerHTML = content;
+            }
+
+            function updateGameState(state, winner_room_id, player_room_id, turn_room_id) {
+                if (state === GAME_STATES.Started) {
+                    const isMyTurn = player_room_id === turn_room_id;
+                    userInput.disabled = !isMyTurn;
+                    gameState.textContent = (isMyTurn) ? 'You may play' : 'Waiting for another player\'s move'
+                } else {
+                    userInput.disabled = true;
+                    if (state === GAME_STATES.Winner) {
+                        if (winner_room_id == player_room_id) {
+                            gameState.textContent = 'Congratulations, you won!';
+                        } else {
+                            gameState.textContent = 'You suck!';
+                        }
+                    } else if (state === GAME_STATES.Draw) {
+                        gameState.textContent = 'Game has ended without a winner.';
+                    } else if (state === GAME_STATES.WaitingRoom) {
+                        gameState.textContent = 'Waiting for your opponent to join the game.'
+                    } else {
+                        console.error(`Unknown state ${state}`);
+                    }
+                }
+            }
+
+            // Function to display the winner or a draw message
+            function displayWinner(winner) {
+                alertBanner.textContent = `${winner} won`
+                userInput.disabled = true;
+            }
+
+            // Function to display an error message
+            function displayError(error) {
+                // Display the error message in the UI
+                alertBanner.textContent = error;
+            }
+
+            userInput.addEventListener('keypress', function(event) {
+                alertBanner.textContent = '';
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    let input = userInput.value.trim().toUpperCase()
+                    if (validateMove(input)) {
+                        sendMove(input);
+                    }
+                }
+            });
+        });
+    </script>
+    <style>
+        #game-container > div {
+            padding: 10px;
+        }
+        #alert-banner {
+            color: red;
+        }
+        #game-state {
+            font-weight: bold;
+        }
+        #game-input {
+            max-width: 70px;
+        }
+        #game-input:disabled {
+            background-color: lightgray;
+        }
+    </style>
+</head>
+<body>
+<div id="game-container">
+    <div id="game-state">
+        <!-- Display game state here -->
+    </div>
+    <div id="alert-banner">
+        <!-- Display any error message here -->
+    </div>
+    <div id="game-board">
+        <!-- Display the game board and update it with JavaScript -->
+    </div>
+    <input type="text" id="game-input" placeholder="movement" disabled/>
+</div>
+
+</body>
+</html>
